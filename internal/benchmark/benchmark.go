@@ -207,9 +207,7 @@ func runWorkers(
 	sem := make(chan struct{}, cfg.Concurrency)
 	var wg sync.WaitGroup
 	for range cfg.Requests {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			if !acquireWorkerSlot(ctx, sem) {
 				return
 			}
@@ -243,7 +241,7 @@ func runWorkers(
 			resultsMu.Lock()
 			results = append(results, result)
 			resultsMu.Unlock()
-		}()
+		})
 	}
 
 	startedAt := snapshot.BenchmarkStarted

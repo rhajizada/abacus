@@ -1,61 +1,101 @@
 # abacus
 
-`abacus` is a simple benchmark for OpenAI-compatible API inference providers.
+![Go](https://img.shields.io/badge/Go-1.24+-blue.svg)
+![License](https://img.shields.io/badge/License-MIT-green.svg)
 
-v1 keeps the core benchmark loop and metrics, drops raw response capture, and uses Charm's terminal UI stack for a warm-up spinner and live benchmark progress bar.
+**abacus** is a lightweight CLI for benchmarking OpenAI-compatible chat completion APIs. Point it at a provider, choose a model, set request volume and concurrency, and get a live terminal view plus a final latency and throughput summary.
 
-## Features
+## Why **abacus**?
 
-- Benchmark any OpenAI-compatible `/v1/chat/completions` endpoint
-- Configure requests, concurrency, prompt, model, and generation settings
-- Send a warm-up request before the run
-- Stream responses and measure TTFT, latency, requests/sec, and tokens/sec
-- Show an interactive terminal UI with Bubble Tea, Bubbles, and Lip Gloss
+- Quick benchmark runs against any OpenAI-compatible `/v1/chat/completions` endpoint.
+- Streaming-aware metrics including TTFT, latency, requests/sec, and tokens/sec.
+- Simple CLI flags for prompts, concurrency, token limits, and auth.
 
-## Usage
+## Quick Start
 
-```bash
-go run ./cmd/abacus \
-  --base-url http://localhost:8000/v1 \
-  --model Qwen/Qwen3-14B \
-  --requests 200 \
-  --concurrency 12
+Build:
+
+```sh
+go build -o bin/abacus ./cmd/abacus
 ```
 
-## Structure
+Run a benchmark:
 
-- `cmd/abacus` Cobra-based CLI entrypoint
-- `internal/app` top-level runtime orchestration
-- `internal/benchmark` benchmark engine and metrics aggregation
-- `internal/sse` SSE event reader
-- `internal/ui` Bubble Tea progress UI
-- `internal/report` final summary rendering
+```sh
+./bin/abacus \
+  --base-url http://localhost:8000/v1 \
+  --model Qwen/Qwen3-14B \
+  --requests 100 \
+  --concurrency 8
+```
 
-### Flags
+Run against an authenticated endpoint:
 
-- `--base-url` Base URL or full chat completions URL
-- `--api-key` Bearer token for authenticated endpoints
-- `--model` Model name to benchmark
-- `--prompt` Prompt text to send
-- `--prompt-file` Read prompt text from a file
-- `--requests` Total number of requests
-- `--concurrency` Number of parallel workers
-- `--max-tokens` `max_tokens` per request
-- `--temperature` Sampling temperature
-- `--stream-include-usage` Ask the backend to include usage in stream events
-- `--no-stream-include-usage` Disable usage in streamed responses
-- `--quiet` Disable the interactive UI
+```sh
+./bin/abacus \
+  --base-url "$LLAMERO_API_BASE" \
+  --api-key "$LLAMERO_API_KEY" \
+  --model qwen3.5:2b \
+  --requests 50 \
+  --concurrency 4 \
+  --max-tokens 2048
+```
 
-## Metrics
+Use a prompt file:
 
-At the end of a run, `abacus` reports:
+```sh
+./bin/abacus \
+  --base-url http://localhost:8000/v1 \
+  --model Qwen/Qwen3-14B \
+  --prompt-file ./prompts/long-context.txt
+```
+
+Print the version:
+
+```sh
+./bin/abacus --version
+```
+
+## Flags
+
+| Flag                        | Description                              |
+| --------------------------- | ---------------------------------------- |
+| `--base-url`                | Base URL or full chat completions URL    |
+| `--api-key`                 | Bearer token for authenticated endpoints |
+| `--model`                   | Model name to benchmark                  |
+| `--prompt`                  | Prompt text to send                      |
+| `--prompt-file`             | Read prompt text from a file             |
+| `--requests`                | Total number of requests                 |
+| `--concurrency`             | Number of parallel workers               |
+| `--max-tokens`              | `max_tokens` per request                 |
+| `--temperature`             | Sampling temperature                     |
+| `--stream-include-usage`    | Request usage in stream events           |
+| `--no-stream-include-usage` | Disable usage requests in stream events  |
+| `--quiet`                   | Disable the interactive UI               |
+| `--version`, `-V`           | Print version                            |
+
+## Output
+
+During a run, **abacus** shows:
+
+- endpoint and model
+- warm-up status
+- completed requests
+- active workers
+- SSE chunk count
+- token totals and live token rate when usage is available
+- latest observed chunk latency
+
+At the end of a run, **abacus** reports:
 
 - successful requests and success rate
 - total wall-clock time
 - requests per second
-- stream chunks received
+- total stream chunks received
 - generated tokens and tokens per second when usage is available
 - average, p50, and p95 TTFT
 - average, p50, and p95 latency
 
-If any streamed response ends with `finish_reason=length`, `abacus` prints a warning after the summary.
+## Notes
+
+If a streamed response ends with `finish_reason=length`, **abacus** prints a warning suggesting a higher `--max-tokens` value or a shorter prompt.
