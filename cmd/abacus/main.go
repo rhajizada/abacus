@@ -8,8 +8,11 @@ import (
 	"github.com/hajizar/abacus/internal/cli"
 )
 
+//nolint:gochecknoglobals // version is set at build time
+var Version = "dev"
+
 func main() {
-	err := cli.Execute()
+	err := cli.Execute(Version)
 	if err == nil {
 		return
 	}

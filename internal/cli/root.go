@@ -36,14 +36,20 @@ func (e ExitError) Unwrap() error {
 	return e.Err
 }
 
-func Execute() error {
+func Execute(version string) error {
 	cfg := config.Default()
+	var showVersion bool
 	root := &cobra.Command{
 		Use:           "abacus",
 		Short:         "Benchmark OpenAI-compatible chat completion endpoints",
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			if showVersion {
+				_, _ = fmt.Fprintln(cmd.OutOrStdout(), version)
+				return nil
+			}
+
 			ctx, stop := signal.NotifyContext(cmd.Context(), osSignals()...)
 			defer stop()
 
@@ -67,8 +73,11 @@ func Execute() error {
 			return ExitError{Err: err, Code: exitCodeFailure, ShowStderr: true}
 		},
 	}
+	root.SetVersionTemplate("{{.Version}}\n")
+	root.Version = version
 
 	flags := root.Flags()
+	flags.BoolVarP(&showVersion, "version", "V", false, "print version")
 	flags.StringVar(&cfg.BaseURL, "base-url", cfg.BaseURL, "Base URL or full chat completions URL")
 	flags.StringVar(&cfg.APIKey, "api-key", cfg.APIKey, "Bearer token for authenticated endpoints")
 	flags.StringVar(&cfg.Model, "model", cfg.Model, "Model name")

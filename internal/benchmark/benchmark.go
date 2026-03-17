@@ -231,6 +231,7 @@ func runWorkers(
 						}
 					}
 				})
+				pushSnapshot()
 			})
 
 			updateSnapshot(snapshot, &snapshotMu, func(current *Snapshot) {
@@ -342,6 +343,21 @@ func applyResult(report *Report, result Result) {
 	}
 }
 
+func closeOnCancel(ctx context.Context, closer io.Closer) func() {
+	done := make(chan struct{})
+	go func() {
+		select {
+		case <-ctx.Done():
+			_ = closer.Close()
+		case <-done:
+		}
+	}()
+
+	return func() {
+		close(done)
+	}
+}
+
 func BuildChatCompletionsURL(baseURL string) string {
 	base := strings.TrimRight(baseURL, "/")
 	if strings.HasSuffix(base, "/chat/completions") {
@@ -387,6 +403,8 @@ func warmupRequest(
 	if err != nil {
 		return 0, err
 	}
+	stopCancelWatch := closeOnCancel(ctx, resp.Body)
+	defer stopCancelWatch()
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
@@ -440,6 +458,8 @@ func streamCompletion(
 	if err != nil {
 		return Result{}
 	}
+	stopCancelWatch := closeOnCancel(ctx, resp.Body)
+	defer stopCancelWatch()
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {

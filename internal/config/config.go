@@ -12,7 +12,7 @@ const DefaultPrompt = "Tell me a fun fact about the Roman Empire"
 const (
 	defaultRequests    = 100
 	defaultMaxTokens   = 1024
-	defaultTemperature = 0.2
+	defaultTemperature = 0.9
 )
 
 type Config struct {
