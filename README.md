@@ -3,11 +3,11 @@
 ![Go](https://img.shields.io/badge/Go-1.24+-blue.svg)
 ![License](https://img.shields.io/badge/License-MIT-green.svg)
 
-**abacus** is a lightweight CLI for benchmarking OpenAI-compatible chat completion APIs. Point it at a provider, choose a model, set request volume and concurrency, and get a live terminal view plus a final latency and throughput summary.
+**abacus** is a CLI to benchmark OpenAI-compatible inference APIs. Point it at a provider, choose a model, set request volume and concurrency, and get a live terminal view plus a final latency and throughput summary.
 
 ## Why **abacus**?
 
-- Quick benchmark runs against any OpenAI-compatible `/v1/chat/completions` endpoint.
+- Quick benchmark runs against OpenAI-compatible inference APIs.
 - Streaming-aware metrics including TTFT, latency, requests/sec, and tokens/sec.
 - Simple CLI flags for prompts, concurrency, token limits, and auth.
 
