@@ -1,0 +1,14 @@
+# Local tooling
+.env
+/.cache
+/.gocache
+/bin
+
+# Secrets and keys
+/secrets/
+*.pem
+
+# Editors / OS junk
+.DS_Store
+.idea/
+.vscode/
