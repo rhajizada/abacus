@@ -1,7 +1,9 @@
 # abacus
 
-![Go](https://img.shields.io/badge/Go-1.24+-blue.svg)
+[![CI](https://github.com/rhajizada/abacus/actions/workflows/ci.yml/badge.svg)](https://github.com/rhajizada/abacus/actions/workflows/ci.yml)
+![Go](https://img.shields.io/badge/Go-1.25+-blue.svg)
 ![License](https://img.shields.io/badge/License-MIT-green.svg)
+![coverage](https://signum.rhajizada.dev/api/badges/f3419caf-305e-4fd0-9f73-c172a430fbdd)
 
 **abacus** is a CLI to benchmark OpenAI-compatible inference APIs. Point it at a provider, choose a model, set request volume and concurrency, and get a live terminal view plus a final latency and throughput summary.
 
