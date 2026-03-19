@@ -1,0 +1,68 @@
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - "*"
+
+env:
+  GOPATH: /go_path
+  GOCACHE: /go_cache
+
+jobs:
+  lint:
+    name: lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          check-latest: true
+
+      - name: Lint with golangci-lint
+        uses: golangci/golangci-lint-action@v8
+        with:
+          args: --timeout 5m
+
+      - name: Check code formatting
+        run: |
+          golangci-lint fmt --diff
+
+      - name: Static analysis
+        run: go vet ./...
+
+      - name: Run tests
+        run: go tool gotestsum --junitfile results/unit-tests.xml
+
+  build:
+    name: build
+    needs: lint
+    strategy:
+      matrix:
+        os: [linux]
+        arch: [amd64]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          check-latest: true
+      - name: Build
+        run: |
+          go build -ldflags="-s -w -X main.Version=$(git rev-parse --short HEAD)" -o bin/abacus ./cmd/abacus
+        env:
+          GOOS: ${{ matrix.os }}
+          GOARCH: ${{ matrix.arch }}
+      - name: Upload
+        uses: actions/upload-artifact@v3
+        with:
+          name: abacus-${{ matrix.os }}-${{ matrix.arch }}
+          path: bin/*
