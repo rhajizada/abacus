@@ -202,7 +202,7 @@ func runWorkers(
 	pushSnapshot()
 	refreshDone := make(chan struct{})
 	defer close(refreshDone)
-	go startSnapshotRefresher(refreshDone, pushSnapshot)
+	go startSnapshotRefresher(refreshDone, pushSnapshot)()
 
 	sem := make(chan struct{}, cfg.Concurrency)
 	var wg sync.WaitGroup
@@ -229,7 +229,6 @@ func runWorkers(
 						}
 					}
 				})
-				pushSnapshot()
 			})
 
 			updateSnapshot(snapshot, &snapshotMu, func(current *Snapshot) {
@@ -471,7 +470,7 @@ func streamCompletion(
 
 	for {
 		event, nextErr := reader.Next()
-		if shouldAbortStream(nextErr, res) {
+		if shouldAbortStream(ctx, nextErr) {
 			return Result{}
 		}
 
@@ -489,11 +488,17 @@ func streamCompletion(
 	return res
 }
 
-func shouldAbortStream(nextErr error, res Result) bool {
+func shouldAbortStream(ctx context.Context, nextErr error) bool {
 	if nextErr == nil || errors.Is(nextErr, io.EOF) {
 		return false
 	}
-	return res.Latency <= 0
+	if ctx.Err() != nil {
+		return true
+	}
+
+	// Any non-EOF stream read error means the connection can no longer make
+	// progress, so abort the stream and let the caller decide how to surface it.
+	return true
 }
 
 func handleStreamEvent(

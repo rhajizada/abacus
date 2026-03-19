@@ -1,6 +1,8 @@
 package benchmark_test
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -306,5 +308,61 @@ func TestRunWarmupFailure(t *testing.T) {
 	}
 	if len(reporter.benchmarkSteps) != 0 {
 		t.Fatalf("len(benchmarkSteps) = %d, want 0 after warm-up failure", len(reporter.benchmarkSteps))
+	}
+}
+
+func TestRunReturnsPromptlyOnCanceledStream(t *testing.T) {
+	t.Parallel()
+
+	streamStarted := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case <-streamStarted:
+			w.Header().Set("Content-Type", "text/event-stream")
+			flusher, ok := w.(http.Flusher)
+			if !ok {
+				http.Error(w, "missing flusher", http.StatusInternalServerError)
+				return
+			}
+			_, _ = fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"content\":\"hello\"}}]}\n\n")
+			flusher.Flush()
+			<-r.Context().Done()
+		default:
+			close(streamStarted)
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"id":"warmup"}`))
+		}
+	}))
+	defer server.Close()
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	resultCh := make(chan error, 1)
+	go func() {
+		_, err := benchmark.Run(ctx, config.Config{
+			BaseURL:     server.URL,
+			Model:       "test-model",
+			Prompt:      "hello",
+			Requests:    1,
+			Concurrency: 1,
+			MaxTokens:   16,
+		}, &recordingReporter{})
+		resultCh <- err
+	}()
+
+	<-streamStarted
+	cancel()
+
+	select {
+	case err := <-resultCh:
+		if err == nil {
+			t.Fatal("Run() error = nil, want context cancellation")
+		}
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("Run() error = %v, want context.Canceled", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Run() did not return after stream cancellation")
 	}
 }
