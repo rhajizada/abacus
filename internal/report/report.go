@@ -2,6 +2,7 @@ package report
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"strconv"
 	"strings"
@@ -21,6 +22,10 @@ const (
 )
 
 func Print(r benchmark.Report) {
+	PrintTo(os.Stdout, r)
+}
+
+func PrintTo(w io.Writer, r benchmark.Report) {
 	label := lipgloss.NewStyle().Foreground(lipgloss.Color("#F59E0B"))
 	value := lipgloss.NewStyle().Foreground(lipgloss.Color("#FEF3C7"))
 	good := lipgloss.NewStyle().Foreground(lipgloss.Color("#86EFAC"))
@@ -106,10 +111,10 @@ func Print(r benchmark.Report) {
 		lines = append(lines, fmt.Sprintf("%s %s", label.Render("warm-up"), warn.Render(r.WarmupError.Error())))
 	}
 
-	_, _ = fmt.Fprintln(os.Stdout, panel.Render(strings.Join(lines, "\n")))
+	_, _ = fmt.Fprintln(w, panel.Render(strings.Join(lines, "\n")))
 
 	if r.TruncatedRequests > 0 {
-		_, _ = fmt.Fprintln(os.Stdout, panel.BorderForeground(lipgloss.Color("#B45309")).Render(
+		_, _ = fmt.Fprintln(w, panel.BorderForeground(lipgloss.Color("#B45309")).Render(
 			warn.Render("warning")+"\n"+
 				warn.Render(fmt.Sprintf("%d request(s) ended with finish_reason=length", r.TruncatedRequests))+"\n"+
 				label.Render("consider increasing --max-tokens or shortening the prompt"),

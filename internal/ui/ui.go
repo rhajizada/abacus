@@ -22,6 +22,9 @@ type Runner struct {
 	once    sync.Once
 }
 
+// Model exposes the Bubble Tea model for direct tests.
+type Model = model
+
 type (
 	benchmarkUpdateMsg benchmark.Snapshot
 	warmupStartedMsg   benchmark.WarmupStarted
@@ -62,6 +65,18 @@ const (
 )
 
 func Start(cancel func()) *Runner {
+	p := tea.NewProgram(NewModel(cancel))
+
+	r := &Runner{program: p, done: make(chan struct{})}
+	go func() {
+		defer close(r.done)
+		_, _ = p.Run()
+	}()
+	return r
+}
+
+// NewModel builds the UI model without starting a Bubble Tea program.
+func NewModel(cancel func()) Model {
 	m := spinner.New()
 	m.Spinner = spinner.MiniDot
 
@@ -70,7 +85,7 @@ func Start(cancel func()) *Runner {
 		progress.WithoutPercentage(),
 	)
 
-	p := tea.NewProgram(model{
+	return model{
 		spinner:  m,
 		progress: bar,
 		cancel:   cancel,
@@ -86,14 +101,27 @@ func Start(cancel func()) *Runner {
 				BorderForeground(lipgloss.Color("#92400E")),
 		},
 		snap: benchmark.Snapshot{Phase: "warmup"},
-	})
+	}
+}
 
-	r := &Runner{program: p, done: make(chan struct{})}
-	go func() {
-		defer close(r.done)
-		_, _ = p.Run()
-	}()
-	return r
+// WarmupStartedMessage wraps a warm-up start update for tests.
+func WarmupStartedMessage(msg benchmark.WarmupStarted) tea.Msg {
+	return warmupStartedMsg(msg)
+}
+
+// WarmupDoneMessage wraps a warm-up completion update for tests.
+func WarmupDoneMessage(msg benchmark.WarmupDone) tea.Msg {
+	return warmupDoneMsg(msg)
+}
+
+// BenchmarkUpdatedMessage wraps a benchmark snapshot update for tests.
+func BenchmarkUpdatedMessage(msg benchmark.Update) tea.Msg {
+	return benchmarkUpdateMsg(msg)
+}
+
+// BenchmarkDoneMessage triggers the final UI shutdown state in tests.
+func BenchmarkDoneMessage() tea.Msg {
+	return benchmarkDoneMsg{}
 }
 
 func (r *Runner) WarmupStarted(msg benchmark.WarmupStarted) {
@@ -156,7 +184,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Tick(quitDelay, func(time.Time) tea.Msg { return quitNowMsg{} })
 	case quitNowMsg:
 		return m, tea.Quit
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		if msg.String() == "ctrl+c" {
 			if m.cancel != nil {
 				m.cancel()
@@ -181,7 +209,7 @@ func (m model) View() tea.View {
 }
 
 func (m model) renderWarmupView() string {
-	status := m.style.muted.Render("Warm up...")
+	status := m.style.muted.Render(" Warm up...")
 	if m.snap.WarmupDone {
 		status = m.renderWarmupStatus()
 	}
@@ -189,7 +217,7 @@ func (m model) renderWarmupView() string {
 	lines := []string{
 		status,
 		fmt.Sprintf("%s %s", m.spinner.View(), m.style.value.Render(m.snap.WarmupURL)),
-		m.style.value.Render(m.snap.WarmupModel),
+		m.style.value.Render(" " + m.snap.WarmupModel),
 	}
 	if m.snap.WarmupError != "" {
 		lines = append(lines, m.style.warn.Render(m.snap.WarmupError))

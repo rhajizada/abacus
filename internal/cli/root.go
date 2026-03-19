@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
 	"syscall"
@@ -37,6 +38,10 @@ func (e ExitError) Unwrap() error {
 }
 
 func Execute(version string) error {
+	return ExecuteArgs(version, os.Args[1:], os.Stdout, os.Stderr)
+}
+
+func ExecuteArgs(version string, args []string, stdout, stderr io.Writer) error {
 	cfg := config.Default()
 	var showVersion bool
 	root := &cobra.Command{
@@ -75,6 +80,9 @@ func Execute(version string) error {
 	}
 	root.SetVersionTemplate("{{.Version}}\n")
 	root.Version = version
+	root.SetOut(stdout)
+	root.SetErr(stderr)
+	root.SetArgs(args)
 
 	flags := root.Flags()
 	flags.BoolVarP(&showVersion, "version", "V", false, "print version")
