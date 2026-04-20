@@ -7,30 +7,33 @@ import (
 	"testing"
 
 	"github.com/hajizar/abacus/internal/config"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestDefault(t *testing.T) {
 	t.Parallel()
 
 	cfg := config.Default()
+	tests := []struct {
+		name string
+		got  any
+		want any
+	}{
+		{name: "default prompt", got: cfg.Prompt, want: config.DefaultPrompt},
+		{name: "default requests", got: cfg.Requests, want: 100},
+		{name: "default concurrency", got: cfg.Concurrency, want: 1},
+		{name: "default max tokens", got: cfg.MaxTokens, want: 1024},
+		{name: "default temperature", got: cfg.Temperature, want: 0.9},
+		{name: "default stream include usage", got: cfg.StreamIncludeUsage, want: true},
+	}
 
-	if cfg.Prompt != config.DefaultPrompt {
-		t.Fatalf("Prompt = %q, want %q", cfg.Prompt, config.DefaultPrompt)
-	}
-	if cfg.Requests != 100 {
-		t.Fatalf("Requests = %d, want 100", cfg.Requests)
-	}
-	if cfg.Concurrency != 1 {
-		t.Fatalf("Concurrency = %d, want 1", cfg.Concurrency)
-	}
-	if cfg.MaxTokens != 1024 {
-		t.Fatalf("MaxTokens = %d, want 1024", cfg.MaxTokens)
-	}
-	if cfg.Temperature != 0.9 {
-		t.Fatalf("Temperature = %v, want 0.9", cfg.Temperature)
-	}
-	if !cfg.StreamIncludeUsage {
-		t.Fatal("StreamIncludeUsage = false, want true")
+	for _, testCase := range tests {
+		testCase := testCase
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
+			assert.Equal(t, testCase.want, testCase.got)
+		})
 	}
 }
 
@@ -128,24 +131,18 @@ func TestValidate(t *testing.T) {
 	}
 
 	for _, testCase := range tests {
+		testCase := testCase
 		t.Run(testCase.name, func(t *testing.T) {
 			t.Parallel()
 
 			cfg := testCase.cfg
 			err := cfg.Validate()
 			if testCase.wantErr != "" {
-				if err == nil {
-					t.Fatalf("Validate() error = nil, want %q", testCase.wantErr)
-				}
-				if err.Error() != testCase.wantErr {
-					t.Fatalf("Validate() error = %q, want %q", err.Error(), testCase.wantErr)
-				}
+				require.EqualError(t, err, testCase.wantErr)
 				return
 			}
 
-			if err != nil {
-				t.Fatalf("Validate() error = %v, want nil", err)
-			}
+			require.NoError(t, err)
 			if testCase.check != nil {
 				testCase.check(t, cfg)
 			}
@@ -156,48 +153,56 @@ func TestValidate(t *testing.T) {
 func TestPromptText(t *testing.T) {
 	t.Parallel()
 
-	t.Run("uses inline prompt when file is unset", func(t *testing.T) {
-		t.Parallel()
+	tests := []struct {
+		name      string
+		newConfig func(*testing.T) config.Config
+		want      string
+		wantErr   string
+	}{
+		{
+			name: "uses inline prompt when file is unset",
+			newConfig: func(*testing.T) config.Config {
+				return config.Config{Prompt: "inline prompt"}
+			},
+			want: "inline prompt",
+		},
+		{
+			name: "reads prompt from file",
+			newConfig: func(t *testing.T) config.Config {
+				t.Helper()
+				dir := t.TempDir()
+				path := filepath.Join(dir, "prompt.txt")
+				require.NoError(t, os.WriteFile(path, []byte("file prompt"), 0o600))
+				return config.Config{Prompt: "inline prompt", PromptFile: path}
+			},
+			want: "file prompt",
+		},
+		{
+			name: "returns wrapped file read error",
+			newConfig: func(t *testing.T) config.Config {
+				t.Helper()
+				return config.Config{PromptFile: filepath.Join(t.TempDir(), "missing.txt")}
+			},
+			wantErr: "read prompt file:",
+		},
+	}
 
-		cfg := config.Config{Prompt: "inline prompt"}
-		got, err := cfg.PromptText()
-		if err != nil {
-			t.Fatalf("PromptText() error = %v, want nil", err)
-		}
-		if got != "inline prompt" {
-			t.Fatalf("PromptText() = %q, want %q", got, "inline prompt")
-		}
-	})
+	for _, testCase := range tests {
+		testCase := testCase
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
 
-	t.Run("reads prompt from file", func(t *testing.T) {
-		t.Parallel()
+			cfg := testCase.newConfig(t)
+			got, err := cfg.PromptText()
 
-		dir := t.TempDir()
-		path := filepath.Join(dir, "prompt.txt")
-		if err := os.WriteFile(path, []byte("file prompt"), 0o600); err != nil {
-			t.Fatalf("WriteFile() error = %v", err)
-		}
+			if testCase.wantErr != "" {
+				require.Error(t, err)
+				assert.True(t, strings.HasPrefix(err.Error(), testCase.wantErr))
+				return
+			}
 
-		cfg := config.Config{Prompt: "inline prompt", PromptFile: path}
-		got, err := cfg.PromptText()
-		if err != nil {
-			t.Fatalf("PromptText() error = %v, want nil", err)
-		}
-		if got != "file prompt" {
-			t.Fatalf("PromptText() = %q, want %q", got, "file prompt")
-		}
-	})
-
-	t.Run("returns wrapped file read error", func(t *testing.T) {
-		t.Parallel()
-
-		cfg := config.Config{PromptFile: filepath.Join(t.TempDir(), "missing.txt")}
-		_, err := cfg.PromptText()
-		if err == nil {
-			t.Fatal("PromptText() error = nil, want non-nil")
-		}
-		if got := err.Error(); !strings.HasPrefix(got, "read prompt file:") {
-			t.Fatalf("PromptText() error = %q, want prefix %q", got, "read prompt file:")
-		}
-	})
+			require.NoError(t, err)
+			assert.Equal(t, testCase.want, got)
+		})
+	}
 }

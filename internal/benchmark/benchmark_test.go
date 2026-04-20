@@ -2,7 +2,6 @@ package benchmark_test
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -12,6 +11,8 @@ import (
 
 	"github.com/hajizar/abacus/internal/benchmark"
 	"github.com/hajizar/abacus/internal/config"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 const truncatedUsageEvent = "data: {\"usage\":{\"total_tokens\":12,\"completion_tokens\":7},\"choices\":[{\"finish_reason\":\"length\"}]}\n\n"
@@ -72,12 +73,11 @@ func TestBuildChatCompletionsURL(t *testing.T) {
 	}
 
 	for _, testCase := range tests {
+		testCase := testCase
 		t.Run(testCase.name, func(t *testing.T) {
 			t.Parallel()
 
-			if got := benchmark.BuildChatCompletionsURL(testCase.baseURL); got != testCase.want {
-				t.Fatalf("BuildChatCompletionsURL(%q) = %q, want %q", testCase.baseURL, got, testCase.want)
-			}
+			assert.Equal(t, testCase.want, benchmark.BuildChatCompletionsURL(testCase.baseURL))
 		})
 	}
 }
@@ -85,67 +85,119 @@ func TestBuildChatCompletionsURL(t *testing.T) {
 func TestDurationAndRateHelpers(t *testing.T) {
 	t.Parallel()
 
-	values := []time.Duration{40 * time.Millisecond, 10 * time.Millisecond, 20 * time.Millisecond}
-	if got := benchmark.AvgDuration(values); got != 70*time.Millisecond/3 {
-		t.Fatalf("AvgDuration() = %v, want %v", got, 70*time.Millisecond/3)
-	}
-	if got := benchmark.PercentileDuration(values, 50); got != 20*time.Millisecond {
-		t.Fatalf("PercentileDuration(..., 50) = %v, want %v", got, 20*time.Millisecond)
-	}
-	if got := benchmark.PercentileDuration(values, 95); got != 40*time.Millisecond {
-		t.Fatalf("PercentileDuration(..., 95) = %v, want %v", got, 40*time.Millisecond)
-	}
-	if got := benchmark.PercentileDuration(nil, 50); got != 0 {
-		t.Fatalf("PercentileDuration(nil, 50) = %v, want 0", got)
+	tests := []struct {
+		name   string
+		assert func(*testing.T)
+	}{
+		{
+			name: "average duration",
+			assert: func(t *testing.T) {
+				t.Helper()
+				values := []time.Duration{40 * time.Millisecond, 10 * time.Millisecond, 20 * time.Millisecond}
+				assert.Equal(t, 70*time.Millisecond/3, benchmark.AvgDuration(values))
+			},
+		},
+		{
+			name: "percentile duration",
+			assert: func(t *testing.T) {
+				t.Helper()
+				values := []time.Duration{40 * time.Millisecond, 10 * time.Millisecond, 20 * time.Millisecond}
+				assert.Equal(t, 20*time.Millisecond, benchmark.PercentileDuration(values, 50))
+				assert.Equal(t, 40*time.Millisecond, benchmark.PercentileDuration(values, 95))
+				assert.Zero(t, benchmark.PercentileDuration(nil, 50))
+			},
+		},
+		{
+			name: "throughput and success rates",
+			assert: func(t *testing.T) {
+				t.Helper()
+				wall := 2 * time.Second
+				assert.Equal(t, 5.0, benchmark.RequestsPerSecond(10, wall))
+				assert.Equal(t, 4.0, benchmark.TokensPerSecond(8, wall))
+				assert.Equal(t, 75.0, benchmark.SuccessRate(3, 4))
+				assert.Zero(t, benchmark.RequestsPerSecond(1, 0))
+				assert.Zero(t, benchmark.TokensPerSecond(1, 0))
+				assert.Zero(t, benchmark.SuccessRate(1, 0))
+			},
+		},
 	}
 
-	wall := 2 * time.Second
-	if got := benchmark.RequestsPerSecond(10, wall); got != 5 {
-		t.Fatalf("RequestsPerSecond() = %v, want 5", got)
-	}
-	if got := benchmark.TokensPerSecond(8, wall); got != 4 {
-		t.Fatalf("TokensPerSecond() = %v, want 4", got)
-	}
-	if got := benchmark.SuccessRate(3, 4); got != 75 {
-		t.Fatalf("SuccessRate() = %v, want 75", got)
-	}
-	if got := benchmark.RequestsPerSecond(1, 0); got != 0 {
-		t.Fatalf("RequestsPerSecond(..., 0) = %v, want 0", got)
-	}
-	if got := benchmark.TokensPerSecond(1, 0); got != 0 {
-		t.Fatalf("TokensPerSecond(..., 0) = %v, want 0", got)
-	}
-	if got := benchmark.SuccessRate(1, 0); got != 0 {
-		t.Fatalf("SuccessRate(..., 0) = %v, want 0", got)
+	for _, testCase := range tests {
+		testCase := testCase
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
+			testCase.assert(t)
+		})
 	}
 }
 
-func TestRunSuccess(t *testing.T) {
+func TestRun(t *testing.T) {
 	t.Parallel()
 
-	server := newSuccessfulBenchmarkServer(t)
-	defer server.Close()
+	tests := []struct {
+		name      string
+		newServer func(*testing.T) *httptest.Server
+		verify    func(*testing.T, benchmark.Report, error, *recordingReporter)
+	}{
+		{
+			name: "success",
+			newServer: func(t *testing.T) *httptest.Server {
+				t.Helper()
+				return newSuccessfulBenchmarkServer(t)
+			},
+			verify: func(t *testing.T, report benchmark.Report, err error, reporter *recordingReporter) {
+				t.Helper()
+				require.NoError(t, err)
+				assertSuccessfulReport(t, report)
+				assertReporterCapturedSuccess(t, reporter)
+			},
+		},
+		{
+			name: "warmup failure",
+			newServer: func(t *testing.T) *httptest.Server {
+				t.Helper()
+				return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+					http.Error(w, "upstream unavailable", http.StatusBadGateway)
+				}))
+			},
+			verify: func(t *testing.T, _ benchmark.Report, err error, reporter *recordingReporter) {
+				t.Helper()
+				require.EqualError(t, err, "warm-up request failed: 502 Bad Gateway - upstream unavailable")
 
-	reporter := &recordingReporter{}
-	cfg := config.Config{
-		BaseURL:            server.URL,
-		APIKey:             "secret",
-		Model:              "test-model",
-		Prompt:             "say hi",
-		Requests:           1,
-		Concurrency:        1,
-		MaxTokens:          32,
-		Temperature:        0.5,
-		StreamIncludeUsage: true,
+				reporter.mu.Lock()
+				defer reporter.mu.Unlock()
+				assert.Len(t, reporter.warmupStarted, 1)
+				assert.Len(t, reporter.warmupDone, 1)
+				require.Error(t, reporter.warmupDone[0].Err)
+				assert.Empty(t, reporter.benchmarkSteps)
+			},
+		},
 	}
 
-	report, err := benchmark.Run(t.Context(), cfg, reporter)
-	if err != nil {
-		t.Fatalf("Run() error = %v, want nil", err)
-	}
+	for _, testCase := range tests {
+		testCase := testCase
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
 
-	assertSuccessfulReport(t, report)
-	assertReporterCapturedSuccess(t, reporter)
+			server := testCase.newServer(t)
+			defer server.Close()
+
+			reporter := &recordingReporter{}
+			report, err := benchmark.Run(t.Context(), config.Config{
+				BaseURL:            server.URL,
+				APIKey:             "secret",
+				Model:              "test-model",
+				Prompt:             "say hi",
+				Requests:           1,
+				Concurrency:        1,
+				MaxTokens:          32,
+				Temperature:        0.5,
+				StreamIncludeUsage: true,
+			}, reporter)
+
+			testCase.verify(t, report, err, reporter)
+		})
+	}
 }
 
 func newSuccessfulBenchmarkServer(t *testing.T) *httptest.Server {
@@ -207,39 +259,17 @@ func writeStreamingResponse(w http.ResponseWriter) {
 func assertSuccessfulReport(t *testing.T, report benchmark.Report) {
 	t.Helper()
 
-	if report.TotalRequests != 1 {
-		t.Fatalf("TotalRequests = %d, want 1", report.TotalRequests)
-	}
-	if report.Successes != 1 {
-		t.Fatalf("Successes = %d, want 1", report.Successes)
-	}
-	if report.RequestErrorCount != 0 {
-		t.Fatalf("RequestErrorCount = %d, want 0", report.RequestErrorCount)
-	}
-	if report.TotalChunks != 2 {
-		t.Fatalf("TotalChunks = %d, want 2", report.TotalChunks)
-	}
-	if report.GeneratedTokens != 7 {
-		t.Fatalf("GeneratedTokens = %d, want 7", report.GeneratedTokens)
-	}
-	if report.UsedTotalTokens {
-		t.Fatal("UsedTotalTokens = true, want false when completion tokens are available")
-	}
-	if report.TruncatedRequests != 1 {
-		t.Fatalf("TruncatedRequests = %d, want 1", report.TruncatedRequests)
-	}
-	if len(report.TTFTs) != 1 {
-		t.Fatalf("len(TTFTs) = %d, want 1", len(report.TTFTs))
-	}
-	if len(report.Latencies) != 1 {
-		t.Fatalf("len(Latencies) = %d, want 1", len(report.Latencies))
-	}
-	if len(report.TotalTokenSamples) != 1 || report.TotalTokenSamples[0] != 12 {
-		t.Fatalf("TotalTokenSamples = %#v, want [12]", report.TotalTokenSamples)
-	}
-	if len(report.CompletionSamples) != 1 || report.CompletionSamples[0] != 7 {
-		t.Fatalf("CompletionSamples = %#v, want [7]", report.CompletionSamples)
-	}
+	assert.Equal(t, 1, report.TotalRequests)
+	assert.Equal(t, 1, report.Successes)
+	assert.Zero(t, report.RequestErrorCount)
+	assert.Equal(t, 2, report.TotalChunks)
+	assert.Equal(t, 7, report.GeneratedTokens)
+	assert.False(t, report.UsedTotalTokens)
+	assert.Equal(t, 1, report.TruncatedRequests)
+	assert.Len(t, report.TTFTs, 1)
+	assert.Len(t, report.Latencies, 1)
+	assert.Equal(t, []int{12}, report.TotalTokenSamples)
+	assert.Equal(t, []int{7}, report.CompletionSamples)
 }
 
 func assertReporterCapturedSuccess(t *testing.T, reporter *recordingReporter) {
@@ -247,122 +277,73 @@ func assertReporterCapturedSuccess(t *testing.T, reporter *recordingReporter) {
 
 	reporter.mu.Lock()
 	defer reporter.mu.Unlock()
-	if len(reporter.warmupStarted) != 1 {
-		t.Fatalf("len(warmupStarted) = %d, want 1", len(reporter.warmupStarted))
-	}
-	if len(reporter.warmupDone) != 1 {
-		t.Fatalf("len(warmupDone) = %d, want 1", len(reporter.warmupDone))
-	}
-	if len(reporter.benchmarkSteps) == 0 {
-		t.Fatal("expected benchmark updates, got none")
-	}
+	assert.Len(t, reporter.warmupStarted, 1)
+	assert.Len(t, reporter.warmupDone, 1)
+	require.NotEmpty(t, reporter.benchmarkSteps)
 	last := reporter.benchmarkSteps[len(reporter.benchmarkSteps)-1]
-	if !last.BenchmarkFinished {
-		t.Fatal("final benchmark update did not mark the benchmark as finished")
-	}
-	if last.Completed != 1 {
-		t.Fatalf("final Completed = %d, want 1", last.Completed)
-	}
-	if last.Tokens != 12 {
-		t.Fatalf("final Tokens = %d, want 12", last.Tokens)
-	}
-}
-
-func TestRunWarmupFailure(t *testing.T) {
-	t.Parallel()
-
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		http.Error(w, "upstream unavailable", http.StatusBadGateway)
-	}))
-	defer server.Close()
-
-	reporter := &recordingReporter{}
-	cfg := config.Config{
-		BaseURL:     server.URL,
-		Model:       "test-model",
-		Prompt:      "say hi",
-		Requests:    1,
-		Concurrency: 1,
-		MaxTokens:   32,
-	}
-
-	_, err := benchmark.Run(t.Context(), cfg, reporter)
-	if err == nil {
-		t.Fatal("Run() error = nil, want non-nil")
-	}
-	want := "warm-up request failed: 502 Bad Gateway - upstream unavailable"
-	if err.Error() != want {
-		t.Fatalf("Run() error = %q, want %q", err.Error(), want)
-	}
-
-	reporter.mu.Lock()
-	defer reporter.mu.Unlock()
-	if len(reporter.warmupStarted) != 1 {
-		t.Fatalf("len(warmupStarted) = %d, want 1", len(reporter.warmupStarted))
-	}
-	if len(reporter.warmupDone) != 1 {
-		t.Fatalf("len(warmupDone) = %d, want 1", len(reporter.warmupDone))
-	}
-	if reporter.warmupDone[0].Err == nil {
-		t.Fatal("warmupDone error = nil, want non-nil")
-	}
-	if len(reporter.benchmarkSteps) != 0 {
-		t.Fatalf("len(benchmarkSteps) = %d, want 0 after warm-up failure", len(reporter.benchmarkSteps))
-	}
+	assert.True(t, last.BenchmarkFinished)
+	assert.Equal(t, 1, last.Completed)
+	assert.Equal(t, 12, last.Tokens)
 }
 
 func TestRunReturnsPromptlyOnCanceledStream(t *testing.T) {
 	t.Parallel()
 
-	streamStarted := make(chan struct{})
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		select {
-		case <-streamStarted:
-			w.Header().Set("Content-Type", "text/event-stream")
-			flusher, ok := w.(http.Flusher)
-			if !ok {
-				http.Error(w, "missing flusher", http.StatusInternalServerError)
-				return
+	tests := []struct {
+		name string
+	}{
+		{name: "canceled stream returns context cancellation"},
+	}
+
+	for _, testCase := range tests {
+		testCase := testCase
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
+
+			streamStarted := make(chan struct{})
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				select {
+				case <-streamStarted:
+					w.Header().Set("Content-Type", "text/event-stream")
+					flusher, ok := w.(http.Flusher)
+					require.True(t, ok)
+					_, _ = fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"content\":\"hello\"}}]}\n\n")
+					flusher.Flush()
+					<-r.Context().Done()
+				default:
+					close(streamStarted)
+					w.Header().Set("Content-Type", "application/json")
+					_, _ = w.Write([]byte(`{"id":"warmup"}`))
+				}
+			}))
+			defer server.Close()
+
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+
+			resultCh := make(chan error, 1)
+			go func() {
+				_, err := benchmark.Run(ctx, config.Config{
+					BaseURL:     server.URL,
+					Model:       "test-model",
+					Prompt:      "hello",
+					Requests:    1,
+					Concurrency: 1,
+					MaxTokens:   16,
+				}, &recordingReporter{})
+				resultCh <- err
+			}()
+
+			<-streamStarted
+			cancel()
+
+			select {
+			case err := <-resultCh:
+				require.Error(t, err)
+				assert.ErrorIs(t, err, context.Canceled)
+			case <-time.After(2 * time.Second):
+				t.Fatal("Run() did not return after stream cancellation")
 			}
-			_, _ = fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"content\":\"hello\"}}]}\n\n")
-			flusher.Flush()
-			<-r.Context().Done()
-		default:
-			close(streamStarted)
-			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"id":"warmup"}`))
-		}
-	}))
-	defer server.Close()
-
-	ctx, cancel := context.WithCancel(t.Context())
-	defer cancel()
-
-	resultCh := make(chan error, 1)
-	go func() {
-		_, err := benchmark.Run(ctx, config.Config{
-			BaseURL:     server.URL,
-			Model:       "test-model",
-			Prompt:      "hello",
-			Requests:    1,
-			Concurrency: 1,
-			MaxTokens:   16,
-		}, &recordingReporter{})
-		resultCh <- err
-	}()
-
-	<-streamStarted
-	cancel()
-
-	select {
-	case err := <-resultCh:
-		if err == nil {
-			t.Fatal("Run() error = nil, want context cancellation")
-		}
-		if !errors.Is(err, context.Canceled) {
-			t.Fatalf("Run() error = %v, want context.Canceled", err)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("Run() did not return after stream cancellation")
+		})
 	}
 }

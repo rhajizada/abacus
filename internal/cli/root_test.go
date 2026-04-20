@@ -10,109 +10,138 @@ import (
 	"testing"
 
 	"github.com/hajizar/abacus/internal/cli"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestExitError(t *testing.T) {
 	t.Parallel()
 
 	wrapped := errors.New("boom")
-	exitErr := cli.ExitError{Err: wrapped, Code: 2, ShowStderr: true}
-	if exitErr.Error() != "boom" {
-		t.Fatalf("Error() = %q, want %q", exitErr.Error(), "boom")
-	}
-	if !errors.Is(exitErr.Unwrap(), wrapped) {
-		t.Fatal("Unwrap() did not return wrapped error")
+	tests := []struct {
+		name       string
+		exitErr    cli.ExitError
+		wantError  string
+		wantUnwrap error
+	}{
+		{
+			name:       "wrapped error",
+			exitErr:    cli.ExitError{Err: wrapped, Code: 2, ShowStderr: true},
+			wantError:  "boom",
+			wantUnwrap: wrapped,
+		},
+		{
+			name:      "zero value",
+			exitErr:   cli.ExitError{},
+			wantError: "",
+		},
 	}
 
-	var zero cli.ExitError
-	if zero.Error() != "" {
-		t.Fatalf("Error() = %q, want empty string", zero.Error())
+	for _, testCase := range tests {
+		testCase := testCase
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
+
+			assert.Equal(t, testCase.wantError, testCase.exitErr.Error())
+			if testCase.wantUnwrap == nil {
+				assert.NoError(t, testCase.exitErr.Unwrap())
+				return
+			}
+
+			assert.ErrorIs(t, testCase.exitErr.Unwrap(), testCase.wantUnwrap)
+		})
 	}
 }
 
-func TestExecuteVersion(t *testing.T) {
+func TestExecuteArgs(t *testing.T) {
 	t.Parallel()
 
-	stdout, stderr, err := runExecute([]string{"--version"}, "1.2.3")
-	if err != nil {
-		t.Fatalf("Execute() error = %v, want nil", err)
-	}
-	if got := strings.TrimSpace(stdout); got != "1.2.3" {
-		t.Fatalf("stdout = %q, want %q", got, "1.2.3")
-	}
-	if stderr != "" {
-		t.Fatalf("stderr = %q, want empty", stderr)
-	}
-}
+	tests := []struct {
+		name      string
+		args      []string
+		version   string
+		newServer func(*testing.T) *httptest.Server
+		verify    func(*testing.T, string, string, error)
+	}{
+		{
+			name:    "version flag",
+			args:    []string{"--version"},
+			version: "1.2.3",
+			verify: func(t *testing.T, stdout, stderr string, err error) {
+				t.Helper()
+				require.NoError(t, err)
+				assert.Equal(t, "1.2.3", strings.TrimSpace(stdout))
+				assert.Empty(t, stderr)
+			},
+		},
+		{
+			name:    "usage error",
+			version: "dev",
+			verify: func(t *testing.T, _, _ string, err error) {
+				t.Helper()
+				require.Error(t, err)
 
-func TestExecuteUsageError(t *testing.T) {
-	t.Parallel()
+				var exitErr cli.ExitError
+				assert.False(t, errors.As(err, &exitErr))
+				assert.EqualError(t, err, "required flag(s) \"base-url\", \"model\" not set")
+			},
+		},
+		{
+			name:    "success",
+			version: "dev",
+			newServer: func(t *testing.T) *httptest.Server {
+				t.Helper()
+				return newCLIServer(t, http.StatusOK)
+			},
+			verify: func(t *testing.T, _, _ string, err error) {
+				t.Helper()
+				require.NoError(t, err)
+			},
+		},
+		{
+			name:    "run failure",
+			version: "dev",
+			newServer: func(t *testing.T) *httptest.Server {
+				t.Helper()
+				return newCLIWarmupFailureServer()
+			},
+			verify: func(t *testing.T, _, _ string, err error) {
+				t.Helper()
+				require.Error(t, err)
 
-	_, _, err := runExecute(nil, "dev")
-	if err == nil {
-		t.Fatal("Execute() error = nil, want non-nil")
-	}
-
-	var exitErr cli.ExitError
-	if errors.As(err, &exitErr) {
-		t.Fatalf("Execute() error = %T, want plain validation error from cobra", err)
-	}
-	if got, want := err.Error(), "required flag(s) \"base-url\", \"model\" not set"; got != want {
-		t.Fatalf("Error() = %q, want %q", got, want)
-	}
-}
-
-func TestExecuteSuccess(t *testing.T) {
-	t.Parallel()
-
-	server := newCLIServer(t, http.StatusOK)
-	defer server.Close()
-
-	_, _, err := runExecute([]string{
-		"--base-url", server.URL,
-		"--model", "test-model",
-		"--prompt", "hello",
-		"--requests", "1",
-		"--concurrency", "1",
-		"--max-tokens", "16",
-		"--quiet",
-	}, "dev")
-	if err != nil {
-		t.Fatalf("Execute() error = %v, want nil", err)
-	}
-}
-
-func TestExecuteRunFailure(t *testing.T) {
-	t.Parallel()
-
-	server := newCLIWarmupFailureServer()
-	defer server.Close()
-
-	_, _, err := runExecute([]string{
-		"--base-url", server.URL,
-		"--model", "test-model",
-		"--prompt", "hello",
-		"--requests", "1",
-		"--concurrency", "1",
-		"--max-tokens", "16",
-		"--quiet",
-	}, "dev")
-	if err == nil {
-		t.Fatal("Execute() error = nil, want non-nil")
+				var exitErr cli.ExitError
+				require.ErrorAs(t, err, &exitErr)
+				assert.Equal(t, 1, exitErr.Code)
+				assert.True(t, exitErr.ShowStderr)
+				assert.Equal(t, "warm-up request failed: 502 Bad Gateway - warmup failed", exitErr.Error())
+			},
+		},
 	}
 
-	var exitErr cli.ExitError
-	if !errors.As(err, &exitErr) {
-		t.Fatalf("Execute() error = %T, want cli.ExitError", err)
-	}
-	if exitErr.Code != 1 {
-		t.Fatalf("Code = %d, want 1", exitErr.Code)
-	}
-	if !exitErr.ShowStderr {
-		t.Fatal("ShowStderr = false, want true")
-	}
-	if got, want := exitErr.Error(), "warm-up request failed: 502 Bad Gateway - warmup failed"; got != want {
-		t.Fatalf("Error() = %q, want %q", got, want)
+	for _, testCase := range tests {
+		testCase := testCase
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
+
+			args := testCase.args
+			var server *httptest.Server
+			if testCase.newServer != nil {
+				server = testCase.newServer(t)
+				defer server.Close()
+				args = []string{
+					"--base-url", server.URL,
+					"--model", "test-model",
+					"--prompt", "hello",
+					"--requests", "1",
+					"--concurrency", "1",
+					"--max-tokens", "16",
+					"--quiet",
+				}
+			}
+
+			stdout, stderr, err := runExecute(args, testCase.version)
+			testCase.verify(t, stdout, stderr, err)
+		})
 	}
 }
 

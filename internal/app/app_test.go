@@ -9,80 +9,102 @@ import (
 
 	"github.com/hajizar/abacus/internal/app"
 	"github.com/hajizar/abacus/internal/config"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestExitError(t *testing.T) {
 	t.Parallel()
 
-	t.Run("returns wrapped error text", func(t *testing.T) {
-		t.Parallel()
+	wrapped := errors.New("boom")
+	tests := []struct {
+		name       string
+		exitErr    app.ExitError
+		wantError  string
+		wantUnwrap error
+	}{
+		{
+			name:       "returns wrapped error text",
+			exitErr:    app.ExitError{Err: wrapped, ShowStderr: true},
+			wantError:  "boom",
+			wantUnwrap: wrapped,
+		},
+		{
+			name:      "handles nil wrapped error",
+			exitErr:   app.ExitError{},
+			wantError: "",
+		},
+	}
 
-		err := errors.New("boom")
-		exitErr := app.ExitError{Err: err, ShowStderr: true}
-		if exitErr.Error() != "boom" {
-			t.Fatalf("Error() = %q, want %q", exitErr.Error(), "boom")
-		}
-		if !errors.Is(exitErr.Unwrap(), err) {
-			t.Fatal("Unwrap() did not return wrapped error")
-		}
-	})
+	for _, testCase := range tests {
+		testCase := testCase
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
 
-	t.Run("handles nil wrapped error", func(t *testing.T) {
-		t.Parallel()
+			assert.Equal(t, testCase.wantError, testCase.exitErr.Error())
+			if testCase.wantUnwrap == nil {
+				assert.NoError(t, testCase.exitErr.Unwrap())
+				return
+			}
 
-		var exitErr app.ExitError
-		if exitErr.Error() != "" {
-			t.Fatalf("Error() = %q, want empty string", exitErr.Error())
-		}
-		if exitErr.Unwrap() != nil {
-			t.Fatalf("Unwrap() = %v, want nil", exitErr.Unwrap())
-		}
-	})
-}
-
-func TestRunQuietSuccess(t *testing.T) {
-	t.Parallel()
-
-	server := newAppServer(t, http.StatusOK)
-	defer server.Close()
-
-	err := app.Run(t.Context(), config.Config{
-		BaseURL:            server.URL,
-		Model:              "test-model",
-		Prompt:             "hello",
-		Requests:           1,
-		Concurrency:        1,
-		MaxTokens:          16,
-		Quiet:              true,
-		StreamIncludeUsage: true,
-	})
-	if err != nil {
-		t.Fatalf("Run() error = %v, want nil", err)
+			assert.ErrorIs(t, testCase.exitErr.Unwrap(), testCase.wantUnwrap)
+		})
 	}
 }
 
-func TestRunQuietWarmupFailure(t *testing.T) {
+func TestRunQuiet(t *testing.T) {
 	t.Parallel()
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		http.Error(w, "warmup failed", http.StatusBadGateway)
-	}))
-	defer server.Close()
-
-	err := app.Run(t.Context(), config.Config{
-		BaseURL:     server.URL,
-		Model:       "test-model",
-		Prompt:      "hello",
-		Requests:    1,
-		Concurrency: 1,
-		MaxTokens:   16,
-		Quiet:       true,
-	})
-	if err == nil {
-		t.Fatal("Run() error = nil, want non-nil")
+	tests := []struct {
+		name      string
+		newServer func(*testing.T) *httptest.Server
+		wantErr   string
+	}{
+		{
+			name: "success",
+			newServer: func(t *testing.T) *httptest.Server {
+				t.Helper()
+				return newAppServer(t, http.StatusOK)
+			},
+		},
+		{
+			name: "warmup failure",
+			newServer: func(t *testing.T) *httptest.Server {
+				t.Helper()
+				return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+					http.Error(w, "warmup failed", http.StatusBadGateway)
+				}))
+			},
+			wantErr: "warm-up request failed: 502 Bad Gateway - warmup failed",
+		},
 	}
-	if got, want := err.Error(), "warm-up request failed: 502 Bad Gateway - warmup failed"; got != want {
-		t.Fatalf("Run() error = %q, want %q", got, want)
+
+	for _, testCase := range tests {
+		testCase := testCase
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
+
+			server := testCase.newServer(t)
+			defer server.Close()
+
+			err := app.Run(t.Context(), config.Config{
+				BaseURL:            server.URL,
+				Model:              "test-model",
+				Prompt:             "hello",
+				Requests:           1,
+				Concurrency:        1,
+				MaxTokens:          16,
+				Quiet:              true,
+				StreamIncludeUsage: true,
+			})
+
+			if testCase.wantErr == "" {
+				require.NoError(t, err)
+				return
+			}
+
+			require.EqualError(t, err, testCase.wantErr)
+		})
 	}
 }
 
