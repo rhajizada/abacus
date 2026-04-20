@@ -73,7 +73,6 @@ func TestBuildChatCompletionsURL(t *testing.T) {
 	}
 
 	for _, testCase := range tests {
-		testCase := testCase
 		t.Run(testCase.name, func(t *testing.T) {
 			t.Parallel()
 
@@ -112,9 +111,9 @@ func TestDurationAndRateHelpers(t *testing.T) {
 			assert: func(t *testing.T) {
 				t.Helper()
 				wall := 2 * time.Second
-				assert.Equal(t, 5.0, benchmark.RequestsPerSecond(10, wall))
-				assert.Equal(t, 4.0, benchmark.TokensPerSecond(8, wall))
-				assert.Equal(t, 75.0, benchmark.SuccessRate(3, 4))
+				assert.InDelta(t, 5.0, benchmark.RequestsPerSecond(10, wall), 0.0001)
+				assert.InDelta(t, 4.0, benchmark.TokensPerSecond(8, wall), 0.0001)
+				assert.InDelta(t, 75.0, benchmark.SuccessRate(3, 4), 0.0001)
 				assert.Zero(t, benchmark.RequestsPerSecond(1, 0))
 				assert.Zero(t, benchmark.TokensPerSecond(1, 0))
 				assert.Zero(t, benchmark.SuccessRate(1, 0))
@@ -123,7 +122,6 @@ func TestDurationAndRateHelpers(t *testing.T) {
 	}
 
 	for _, testCase := range tests {
-		testCase := testCase
 		t.Run(testCase.name, func(t *testing.T) {
 			t.Parallel()
 			testCase.assert(t)
@@ -175,7 +173,6 @@ func TestRun(t *testing.T) {
 	}
 
 	for _, testCase := range tests {
-		testCase := testCase
 		t.Run(testCase.name, func(t *testing.T) {
 			t.Parallel()
 
@@ -296,7 +293,6 @@ func TestRunReturnsPromptlyOnCanceledStream(t *testing.T) {
 	}
 
 	for _, testCase := range tests {
-		testCase := testCase
 		t.Run(testCase.name, func(t *testing.T) {
 			t.Parallel()
 
@@ -306,7 +302,11 @@ func TestRunReturnsPromptlyOnCanceledStream(t *testing.T) {
 				case <-streamStarted:
 					w.Header().Set("Content-Type", "text/event-stream")
 					flusher, ok := w.(http.Flusher)
-					require.True(t, ok)
+					if !ok {
+						t.Error("response writer does not implement http.Flusher")
+						http.Error(w, "missing flusher", http.StatusInternalServerError)
+						return
+					}
 					_, _ = fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"content\":\"hello\"}}]}\n\n")
 					flusher.Flush()
 					<-r.Context().Done()
@@ -340,7 +340,7 @@ func TestRunReturnsPromptlyOnCanceledStream(t *testing.T) {
 			select {
 			case err := <-resultCh:
 				require.Error(t, err)
-				assert.ErrorIs(t, err, context.Canceled)
+				require.ErrorIs(t, err, context.Canceled)
 			case <-time.After(2 * time.Second):
 				t.Fatal("Run() did not return after stream cancellation")
 			}

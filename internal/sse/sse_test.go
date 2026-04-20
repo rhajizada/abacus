@@ -1,13 +1,13 @@
 package sse_test
 
 import (
-	"errors"
 	"io"
 	"strings"
 	"testing"
 
 	"github.com/hajizar/abacus/internal/sse"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 type expectedRead struct {
@@ -60,7 +60,6 @@ func TestReaderNext(t *testing.T) {
 	}
 
 	for _, testCase := range tests {
-		testCase := testCase
 		t.Run(testCase.name, func(t *testing.T) {
 			t.Parallel()
 
@@ -69,11 +68,11 @@ func TestReaderNext(t *testing.T) {
 				got, err := reader.Next()
 				assert.Equal(t, want.event, got)
 				if want.err == nil {
-					assert.NoError(t, err)
+					require.NoError(t, err)
 					continue
 				}
 
-				assert.True(t, errors.Is(err, want.err))
+				require.ErrorIs(t, err, want.err)
 			}
 		})
 	}

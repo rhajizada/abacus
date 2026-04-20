@@ -38,7 +38,6 @@ func TestExitError(t *testing.T) {
 	}
 
 	for _, testCase := range tests {
-		testCase := testCase
 		t.Run(testCase.name, func(t *testing.T) {
 			t.Parallel()
 
@@ -82,7 +81,7 @@ func TestExecuteArgs(t *testing.T) {
 				require.Error(t, err)
 
 				var exitErr cli.ExitError
-				assert.False(t, errors.As(err, &exitErr))
+				assert.NotErrorAs(t, err, &exitErr)
 				assert.EqualError(t, err, "required flag(s) \"base-url\", \"model\" not set")
 			},
 		},
@@ -119,7 +118,6 @@ func TestExecuteArgs(t *testing.T) {
 	}
 
 	for _, testCase := range tests {
-		testCase := testCase
 		t.Run(testCase.name, func(t *testing.T) {
 			t.Parallel()
 
