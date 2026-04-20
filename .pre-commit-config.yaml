@@ -1,0 +1,46 @@
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+        args: [--allow-multiple-documents]
+      - id: check-json
+      - id: mixed-line-ending
+        args: ["--fix=lf"]
+      - id: check-added-large-files
+        args: ["--maxkb=2500"]
+      - id: check-executables-have-shebangs
+      - id: check-case-conflict
+      - id: check-merge-conflict
+      - id: check-symlinks
+      - id: detect-private-key
+  - repo: local
+    hooks:
+      - id: golangci-lint-full
+        name: golangci-lint-full
+        language: system
+        pass_filenames: false
+        require_serial: true
+        types: [go]
+        entry: golangci-lint run --fix
+      - id: golangci-lint-fmt
+        name: golangci-lint-fmt
+        language: system
+        pass_filenames: false
+        require_serial: true
+        types: [go]
+        entry: golangci-lint fmt
+      - id: golangci-lint-config-verify
+        name: golangci-lint-config-verify
+        language: system
+        pass_filenames: false
+        files: '\.golangci\.(?:yml|yaml|toml|json)'
+        entry: golangci-lint config verify
+      - id: gotestsum
+        name: run go tests
+        language: system
+        pass_filenames: false
+        types: [go]
+        entry: go tool gotestsum
