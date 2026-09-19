@@ -5,8 +5,8 @@ go 1.25.5
 tool gotest.tools/gotestsum
 
 require (
-	charm.land/bubbles/v2 v2.1.0
-	charm.land/bubbletea/v2 v2.0.6
+	charm.land/bubbles/v2 v2.2.1
+	charm.land/bubbletea/v2 v2.0.8
 	charm.land/lipgloss/v2 v2.0.6
 	github.com/spf13/cobra v1.10.2
 	github.com/stretchr/testify v1.12.1
@@ -31,7 +31,7 @@ require (
 	github.com/lucasb-eyer/go-colorful v1.4.1 // indirect
 	github.com/mattn/go-colorable v0.1.13 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
-	github.com/mattn/go-runewidth v0.0.24 // indirect
+	github.com/mattn/go-runewidth v0.0.27 // indirect
 	github.com/muesli/cancelreader v0.2.2 // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/spf13/pflag v1.0.10 // indirect
